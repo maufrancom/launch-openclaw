@@ -259,7 +259,7 @@ install_code_server_extensions() {
 }
 
 configure_code_server() {
-  local config_dir settings_dir settings_user_dir workspaces_dir workspace_path
+  local config_dir settings_dir settings_user_dir workspaces_dir workspace_path home_workspace_path
   local terminals_target code_server_origin terminal_cmd run_once_marker wrapper_cmd
 
   config_dir="$TARGET_HOME/.config/code-server"
@@ -267,6 +267,7 @@ configure_code_server() {
   settings_user_dir="$settings_dir/User"
   workspaces_dir="$settings_user_dir/Workspaces"
   workspace_path="$workspaces_dir/openclaw-launchable.code-workspace"
+  home_workspace_path="$TARGET_HOME/openclaw-launchable.code-workspace"
   terminals_target="$TARGET_HOME/.vscode/terminals.json"
   code_server_origin="$(derive_code_server_origin)"
   run_once_marker="$TARGET_HOME/.cache/openclaw-launchable/configure-ran"
@@ -321,11 +322,11 @@ EOF
   run_as_root -u "$TARGET_USER" tee "$settings_dir/coder.json" >/dev/null <<EOF
 {
   "query": {
-    "folder": "${LAUNCH_REPO_DIR}"
+    "folder": "${TARGET_HOME}"
   },
   "lastVisited": {
-    "url": "${LAUNCH_REPO_DIR}",
-    "workspace": false
+    "url": "${workspace_path}",
+    "workspace": true
   }
 }
 EOF
@@ -344,6 +345,8 @@ EOF
   ]
 }
 EOF
+
+  run_as_root -u "$TARGET_USER" install -m 644 "$workspace_path" "$home_workspace_path"
 
   log "code-server configured for ${code_server_origin}"
 }

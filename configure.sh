@@ -183,7 +183,7 @@ stop_existing_gateway() {
 start_auto_approve_loop() {
   local approval_log="$1"
   (
-    local end_time now device_ids device_id
+    local end_time now pending_count
     end_time=$(( $(date +%s) + 1200 ))
 
     while true; do
@@ -192,18 +192,21 @@ start_auto_approve_loop() {
         exit 0
       fi
 
-      if openclaw devices list >"$approval_log.tmp" 2>&1; then
-        device_ids="$(
-          grep -Eo '[[:alnum:]_-]{6,}' "$approval_log.tmp" | awk '!seen[$0]++'
-        )"
-        for device_id in $device_ids; do
-          openclaw devices approve "$device_id" >>"$approval_log" 2>&1 || true
-        done
+      if openclaw devices list --json >"$approval_log.tmp" 2>&1; then
+        if command -v jq >/dev/null 2>&1; then
+          pending_count="$(jq -r '.pending | length' "$approval_log.tmp" 2>/dev/null || printf '0')"
+        else
+          pending_count="$(node -e 'const fs=require("fs");const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,"utf8"));process.stdout.write(String(Array.isArray(j.pending)?j.pending.length:0));' "$approval_log.tmp" 2>/dev/null || printf '0')"
+        fi
+
+        if [[ "$pending_count" =~ ^[0-9]+$ ]] && [[ "$pending_count" -gt 0 ]]; then
+          openclaw devices approve --latest >>"$approval_log" 2>&1 || true
+        fi
       fi
 
       cat "$approval_log.tmp" >>"$approval_log" 2>/dev/null || true
       rm -f "$approval_log.tmp"
-      sleep 5
+      sleep 1
     done
   ) >/dev/null 2>&1 &
 }
@@ -222,10 +225,16 @@ derive_openclaw_origin() {
 
 configure_control_ui_origin() {
   local origin
+  local origins_json
 
   origin="$(derive_openclaw_origin)"
-  log "Setting OpenClaw Control UI allowedOrigins to ${origin}"
-  openclaw config set gateway.controlUi.allowedOrigins "[\"${origin}\"]" --strict-json >/dev/null
+  origins_json="$(cat <<EOF
+["http://127.0.0.1:18789","http://localhost:18789","${origin}"]
+EOF
+)"
+
+  log "Setting OpenClaw Control UI allowedOrigins to ${origins_json}"
+  openclaw config set gateway.controlUi.allowedOrigins "$origins_json" --strict-json >/dev/null
 }
 
 print_gateway_info() {
@@ -234,7 +243,11 @@ print_gateway_info() {
 
   host_name="$(hostname 2>/dev/null || true)"
   origin="$(derive_openclaw_origin)"
-  url="${origin}/chat?session=main"
+  if [[ -n "$token" ]]; then
+    url="${origin}/#token=${token}"
+  else
+    url="${origin}/chat?session=main"
+  fi
 
   printf '\nOpenClaw Gateway Started\n'
   printf '========================\n\n'
