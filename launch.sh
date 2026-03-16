@@ -19,7 +19,6 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
 LAUNCH_REPO_DIR="${LAUNCH_REPO_DIR:-$HOME/launch-openclaw}"
-CODE_SERVER_THEME_URL="${CODE_SERVER_THEME_URL:-https://raw.githubusercontent.com/NVIDIA/OpenShell-Community/main/brev/nemoclaw-plugin/nv-theme-0.0.1.vsix}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -258,15 +257,16 @@ install_code_server() {
 }
 
 install_code_server_extensions() {
-  local config_dir theme_vsix
+  local config_dir theme_vsix source_theme_vsix
 
   config_dir="$TARGET_HOME/.config/code-server"
   theme_vsix="$config_dir/nv-theme-0.0.1.vsix"
+  source_theme_vsix="$LAUNCH_REPO_DIR/nv-theme-0.0.1.vsix"
 
   log "Installing code-server extensions"
+  [[ -f "$source_theme_vsix" ]] || fail "Theme VSIX not found in cloned repo: $source_theme_vsix"
   run_as_root -u "$TARGET_USER" mkdir -p "$config_dir"
-  curl -fsSL "$CODE_SERVER_THEME_URL" -o "$theme_vsix"
-  run_as_root chown "$TARGET_USER:$TARGET_USER" "$theme_vsix"
+  run_as_root -u "$TARGET_USER" install -m 644 "$source_theme_vsix" "$theme_vsix"
   run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension "$theme_vsix" --force >/dev/null
   run_as_root -H -u "$TARGET_USER" env HOME="$TARGET_HOME" code-server --install-extension fabiospampinato.vscode-terminals --force >/dev/null
 }
