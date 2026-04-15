@@ -244,6 +244,31 @@ ensure_bazel() {
   log "Bazel available at $(command -v bazel)"
 }
 
+ensure_ngc_cli() {
+  if command -v ngc >/dev/null 2>&1; then
+    log "NGC CLI already installed: $(ngc --version 2>/dev/null | head -n 1)"
+    return
+  fi
+
+  log "Installing NGC CLI"
+  require_cmd curl
+
+  local tmp_zip tmp_dir
+  tmp_zip="$(mktemp /tmp/ngccli_linux.XXXXXX.zip)"
+  tmp_dir="$(mktemp -d /tmp/ngc-install.XXXXXX)"
+
+  curl -fSL "https://ngc.nvidia.com/downloads/ngccli_linux.zip" -o "$tmp_zip"
+
+  run_as_root apt-get install -y unzip >/dev/null 2>&1 || true
+  unzip -o "$tmp_zip" -d "$tmp_dir"
+  run_as_root install -m 755 "$tmp_dir/ngc-cli/ngc" /usr/local/bin/ngc
+  rm -rf "$tmp_zip" "$tmp_dir"
+
+  append_path_if_dir "/usr/local/bin"
+  command -v ngc >/dev/null 2>&1 || fail "NGC CLI installation completed, but ngc is not on PATH"
+  log "NGC CLI available at $(command -v ngc)"
+}
+
 clone_or_refresh_repo() {
   local repo_url="$1"
   local repo_ref="$2"
@@ -450,26 +475,29 @@ main() {
     TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   fi
 
-  log "Step 1/9: Ensuring Node.js >= 22"
+  log "Step 1/10: Ensuring Node.js >= 22"
   ensure_node
   log "Confirmed Node version: $(node --version)"
 
-  log "Step 2/9: Ensuring OpenClaw is installed"
+  log "Step 2/10: Ensuring OpenClaw is installed"
   ensure_openclaw_installed
 
-  log "Step 3/9: Verifying OpenClaw CLI availability"
+  log "Step 3/10: Verifying OpenClaw CLI availability"
   verify_openclaw_cli
 
-  log "Step 4/9: Installing Bazel"
+  log "Step 4/10: Installing Bazel"
   ensure_bazel
 
-  log "Step 5/9: Cloning and building OSMO"
+  log "Step 5/10: Installing NGC CLI"
+  ensure_ngc_cli
+
+  log "Step 6/10: Cloning and building OSMO"
   install_osmo
 
-  #log "Step 6/9: Cloning nurec-workflows"
+  #log "Step 7/10: Cloning nurec-workflows"
   #clone_nurec_workflows
 
-  log "Step 7/9: Cloning the launch-openclaw repo and configuring code-server"
+  log "Step 8/10: Cloning the launch-openclaw repo and configuring code-server"
   clone_or_refresh_launch_repo
   install_code_server
   install_code_server_extensions
@@ -477,11 +505,11 @@ main() {
   enable_code_server_service
 
   if is_openclaw_configured; then
-    log "Step 8/9: OpenClaw is already configured"
+    log "Step 9/10: OpenClaw is already configured"
   else
-    log "Step 8/9: OpenClaw onboarding is deferred to configure.sh"
+    log "Step 9/10: OpenClaw onboarding is deferred to configure.sh"
   fi
-  log "Step 9/9: Printing code-server access information"
+  log "Step 10/10: Printing code-server access information"
   print_configuration_pending
 }
 
