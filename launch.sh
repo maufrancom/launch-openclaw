@@ -305,10 +305,12 @@ install_osmo() {
   clone_or_refresh_repo "$OSMO_REPO_URL" "$OSMO_REPO_REF" "$OSMO_REPO_DIR" "OSMO"
 
   log "Ensuring C++ toolchain is available for Bazel"
-  if ! echo 'int main(){}' | g++ -x c++ - -o /dev/null 2>/dev/null; then
+  if ! echo 'int main(){}' | gcc -x c++ - -o /dev/null 2>/dev/null; then
     log "C++ toolchain missing or broken, installing build-essential"
     run_as_root apt-get update
     run_as_root apt-get install -y build-essential
+    log "Cleaning Bazel cache after toolchain change"
+    (cd "$OSMO_REPO_DIR" && bazel clean 2>/dev/null || true)
   fi
 
   log "Building OSMO with Bazel"
