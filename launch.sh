@@ -245,9 +245,15 @@ ensure_bazel() {
 }
 
 ensure_ngc_cli() {
-  if command -v ngc >/dev/null 2>&1; then
+  if command -v ngc >/dev/null 2>&1 && ngc --version >/dev/null 2>&1; then
     log "NGC CLI already installed: $(ngc --version 2>/dev/null | head -n 1)"
     return
+  fi
+
+  if command -v ngc >/dev/null 2>&1; then
+    log "Existing NGC CLI is broken, removing it"
+    run_as_root rm -f "$(command -v ngc)"
+    run_as_root rm -rf /opt/ngc-cli
   fi
 
   log "Installing NGC CLI"
@@ -261,7 +267,10 @@ ensure_ngc_cli() {
 
   run_as_root apt-get install -y unzip >/dev/null 2>&1 || true
   unzip -o "$tmp_zip" -d "$tmp_dir"
-  run_as_root install -m 755 "$tmp_dir/ngc-cli/ngc" /usr/local/bin/ngc
+  run_as_root rm -rf /opt/ngc-cli
+  run_as_root mv "$tmp_dir/ngc-cli" /opt/ngc-cli
+  run_as_root chmod 755 /opt/ngc-cli/ngc
+  run_as_root ln -sf /opt/ngc-cli/ngc /usr/local/bin/ngc
   rm -rf "$tmp_zip" "$tmp_dir"
 
   append_path_if_dir "/usr/local/bin"
@@ -296,13 +305,8 @@ install_osmo() {
   clone_or_refresh_repo "$OSMO_REPO_URL" "$OSMO_REPO_REF" "$OSMO_REPO_DIR" "OSMO"
 
   log "Ensuring C++ toolchain is available for Bazel"
-  local need_cxx=0
-  if ! command -v g++ >/dev/null 2>&1; then
-    need_cxx=1
-  elif ! g++ -x c++ -E -c /dev/null -o /dev/null 2>/dev/null; then
-    need_cxx=1
-  fi
-  if [[ "$need_cxx" -eq 1 ]]; then
+  if ! echo 'int main(){}' | g++ -x c++ - -o /dev/null 2>/dev/null; then
+    log "C++ toolchain missing or broken, installing build-essential"
     run_as_root apt-get update
     run_as_root apt-get install -y build-essential
   fi
