@@ -306,11 +306,21 @@ install_osmo() {
 
   log "Ensuring C++ toolchain is available for Bazel"
   if ! echo 'int main(){}' | gcc -x c++ - -o /dev/null 2>/dev/null; then
-    log "C++ toolchain missing or broken, installing build-essential"
+    log "C++ toolchain missing or broken, installing matching g++ package"
     run_as_root apt-get update
-    run_as_root apt-get install -y build-essential
+    local gcc_ver
+    gcc_ver="$(gcc -dumpversion 2>/dev/null || true)"
+    if [[ -n "$gcc_ver" ]]; then
+      log "Detected gcc version ${gcc_ver}, installing g++-${gcc_ver}"
+      run_as_root apt-get install -y "g++-${gcc_ver}" build-essential
+    else
+      run_as_root apt-get install -y build-essential
+    fi
+    if ! echo 'int main(){}' | gcc -x c++ - -o /dev/null 2>/dev/null; then
+      fail "Installed build-essential and g++-${gcc_ver:-default} but gcc still cannot compile C++. Check 'gcc -v' and ensure cc1plus is present."
+    fi
     log "Cleaning Bazel cache after toolchain change"
-    (cd "$OSMO_REPO_DIR" && bazel clean 2>/dev/null || true)
+    (cd "$OSMO_REPO_DIR" && bazel clean --expunge 2>/dev/null || true)
   fi
 
   log "Building OSMO with Bazel"
