@@ -335,6 +335,14 @@ install_osmo() {
   fi
   (cd "$OSMO_REPO_DIR" && bazel build "${extra_bazel_args[@]}" //...)
 
+  local osmo_bin="$OSMO_REPO_DIR/bazel-bin/src/cli/cli"
+  if [[ -f "$osmo_bin" ]]; then
+    log "Symlinking osmo -> ${osmo_bin}"
+    run_as_root ln -sf "$osmo_bin" /usr/local/bin/osmo
+  else
+    fail "OSMO build succeeded but expected binary not found: $osmo_bin"
+  fi
+
   log "OSMO build complete"
 }
 
