@@ -19,6 +19,12 @@ OPENCLAW_ENV_FILE="${OPENCLAW_ENV_FILE:-$HOME/.openclaw/.env}"
 LAUNCH_REPO_URL="${LAUNCH_REPO_URL:-https://github.com/liveaverage/launch-openclaw.git}"
 LAUNCH_REPO_REF="${LAUNCH_REPO_REF:-main}"
 LAUNCH_REPO_DIR="${LAUNCH_REPO_DIR:-$HOME/launch-openclaw}"
+OSMO_REPO_URL="${OSMO_REPO_URL:-https://github.com/maufrancom/OSMO.git}"
+OSMO_REPO_REF="${OSMO_REPO_REF:-main}"
+OSMO_REPO_DIR="${OSMO_REPO_DIR:-$HOME/OSMO}"
+NUREC_REPO_URL="${NUREC_REPO_URL:-https://gitlab-master.nvidia.com/tse/nurec-workflows.git}"
+NUREC_REPO_REF="${NUREC_REPO_REF:-main}"
+NUREC_REPO_DIR="${NUREC_REPO_DIR:-$HOME/nurec-workflows}"
 TARGET_USER="${SUDO_USER:-$(id -un)}"
 TARGET_HOME="${HOME}"
 
@@ -110,20 +116,7 @@ detect_deb_arch() {
 }
 
 clone_or_refresh_launch_repo() {
-  log "Ensuring launch-openclaw repo is available at $LAUNCH_REPO_DIR"
-
-  mkdir -p "$(dirname "$LAUNCH_REPO_DIR")"
-
-  if [[ -d "$LAUNCH_REPO_DIR/.git" ]]; then
-    git -C "$LAUNCH_REPO_DIR" fetch --tags --prune origin
-    git -C "$LAUNCH_REPO_DIR" checkout "$LAUNCH_REPO_REF"
-    git -C "$LAUNCH_REPO_DIR" pull --ff-only origin "$LAUNCH_REPO_REF"
-  elif [[ -e "$LAUNCH_REPO_DIR" ]]; then
-    fail "Launch repo target exists but is not a git checkout: $LAUNCH_REPO_DIR"
-  else
-    git clone --branch "$LAUNCH_REPO_REF" "$LAUNCH_REPO_URL" "$LAUNCH_REPO_DIR"
-  fi
-
+  clone_or_refresh_repo "$LAUNCH_REPO_URL" "$LAUNCH_REPO_REF" "$LAUNCH_REPO_DIR" "launch-openclaw"
   [[ -f "$LAUNCH_REPO_DIR/configure.sh" ]] || fail "configure.sh not found in cloned repo: $LAUNCH_REPO_DIR"
 }
 
@@ -220,6 +213,73 @@ verify_openclaw_cli() {
   if ! openclaw --help >/dev/null 2>&1; then
     fail "The OpenClaw CLI failed to run. Check PATH, reinstall with the official installer, and retry."
   fi
+}
+
+detect_bazelisk_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf 'amd64\n' ;;
+    aarch64|arm64) printf 'arm64\n' ;;
+    *) fail "Unsupported architecture for Bazelisk: $(uname -m)" ;;
+  esac
+}
+
+ensure_bazel() {
+  if command -v bazel >/dev/null 2>&1; then
+    log "Bazel already installed: $(bazel --version 2>/dev/null | head -n 1)"
+    return
+  fi
+
+  local arch
+  arch="$(detect_bazelisk_arch)"
+
+  log "Installing Bazelisk (Bazel launcher)"
+  require_cmd curl
+  curl -fsSL "https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-${arch}" -o /tmp/bazelisk
+  chmod +x /tmp/bazelisk
+  run_as_root install -m 755 /tmp/bazelisk /usr/local/bin/bazel
+  rm -f /tmp/bazelisk
+
+  append_path_if_dir "/usr/local/bin"
+  command -v bazel >/dev/null 2>&1 || fail "Bazelisk installation completed, but bazel is not on PATH"
+  log "Bazel available at $(command -v bazel)"
+}
+
+clone_or_refresh_repo() {
+  local repo_url="$1"
+  local repo_ref="$2"
+  local repo_dir="$3"
+  local label="$4"
+
+  log "Ensuring ${label} repo is available at ${repo_dir}"
+  mkdir -p "$(dirname "$repo_dir")"
+
+  if [[ -d "$repo_dir/.git" ]]; then
+    git -C "$repo_dir" fetch --tags --prune origin
+    git -C "$repo_dir" checkout "$repo_ref"
+    git -C "$repo_dir" pull --ff-only origin "$repo_ref"
+  elif [[ -e "$repo_dir" ]]; then
+    fail "${label} repo target exists but is not a git checkout: $repo_dir"
+  else
+    git clone --branch "$repo_ref" "$repo_url" "$repo_dir"
+  fi
+}
+
+install_osmo() {
+  log "Installing OSMO from source"
+  require_cmd git
+
+  clone_or_refresh_repo "$OSMO_REPO_URL" "$OSMO_REPO_REF" "$OSMO_REPO_DIR" "OSMO"
+
+  log "Building OSMO with Bazel"
+  require_cmd bazel
+  (cd "$OSMO_REPO_DIR" && bazel build //...)
+
+  log "OSMO build complete"
+}
+
+clone_nurec_workflows() {
+  require_cmd git
+  clone_or_refresh_repo "$NUREC_REPO_URL" "$NUREC_REPO_REF" "$NUREC_REPO_DIR" "nurec-workflows"
 }
 
 install_code_server() {
@@ -390,17 +450,26 @@ main() {
     TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
   fi
 
-  log "Step 1/6: Ensuring Node.js >= 22"
+  log "Step 1/9: Ensuring Node.js >= 22"
   ensure_node
   log "Confirmed Node version: $(node --version)"
 
-  log "Step 2/6: Ensuring OpenClaw is installed"
+  log "Step 2/9: Ensuring OpenClaw is installed"
   ensure_openclaw_installed
 
-  log "Step 3/6: Verifying OpenClaw CLI availability"
+  log "Step 3/9: Verifying OpenClaw CLI availability"
   verify_openclaw_cli
 
-  log "Step 4/6: Cloning the launch-openclaw repo and configuring code-server"
+  log "Step 4/9: Installing Bazel"
+  ensure_bazel
+
+  log "Step 5/9: Cloning and building OSMO"
+  install_osmo
+
+  #log "Step 6/9: Cloning nurec-workflows"
+  #clone_nurec_workflows
+
+  log "Step 7/9: Cloning the launch-openclaw repo and configuring code-server"
   clone_or_refresh_launch_repo
   install_code_server
   install_code_server_extensions
@@ -408,11 +477,11 @@ main() {
   enable_code_server_service
 
   if is_openclaw_configured; then
-    log "Step 5/6: OpenClaw is already configured"
+    log "Step 8/9: OpenClaw is already configured"
   else
-    log "Step 5/6: OpenClaw onboarding is deferred to configure.sh"
+    log "Step 8/9: OpenClaw onboarding is deferred to configure.sh"
   fi
-  log "Step 6/6: Printing code-server access information"
+  log "Step 9/9: Printing code-server access information"
   print_configuration_pending
 }
 
