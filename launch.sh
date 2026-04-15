@@ -323,9 +323,17 @@ install_osmo() {
     (cd "$OSMO_REPO_DIR" && bazel clean --expunge 2>/dev/null || true)
   fi
 
+  local gcc_lib_dir
+  gcc_lib_dir="$(dirname "$(gcc -print-file-name=cc1plus 2>/dev/null)" 2>/dev/null || true)"
+
   log "Building OSMO with Bazel"
   require_cmd bazel
-  (cd "$OSMO_REPO_DIR" && bazel build //...)
+  local -a extra_bazel_args=()
+  if [[ -n "$gcc_lib_dir" && -d "$gcc_lib_dir" ]]; then
+    log "Adding GCC library path to Bazel sandbox: ${gcc_lib_dir}"
+    extra_bazel_args+=("--sandbox_add_mount_pair=${gcc_lib_dir}")
+  fi
+  (cd "$OSMO_REPO_DIR" && bazel build "${extra_bazel_args[@]}" //...)
 
   log "OSMO build complete"
 }
