@@ -295,6 +295,12 @@ install_osmo() {
 
   clone_or_refresh_repo "$OSMO_REPO_URL" "$OSMO_REPO_REF" "$OSMO_REPO_DIR" "OSMO"
 
+  log "Ensuring C++ toolchain is available for Bazel"
+  if ! command -v g++ >/dev/null 2>&1; then
+    run_as_root apt-get update
+    run_as_root apt-get install -y g++
+  fi
+
   log "Building OSMO with Bazel"
   require_cmd bazel
   (cd "$OSMO_REPO_DIR" && bazel build //...)
